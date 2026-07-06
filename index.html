@@ -1,0 +1,207 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <!-- Referrer must flow to YouTube or the embed throws error 153 -->
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <!-- MRBD conventions -->
+  <meta name="viewport" content="width=600, height=600, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="YouTube playlist player for Meta Ray-Ban Display">
+  <meta name="mrbd-web-app-capable" content="yes">
+  <title>Glasses Playlist</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 600px;
+      height: 600px;
+      background: #000;            /* pure black = transparent on the additive display */
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+      color: #cfefff;
+    }
+    #status {
+      height: 26px; line-height: 26px;
+      text-align: center; font-size: 20px; color: #9fe8ff;
+    }
+    #player { width: 600px; height: 338px; background: #000; }
+    #vtitle {
+      height: 30px; line-height: 30px; padding: 0 12px;
+      text-align: center; font-size: 18px; color: #ffffff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #controls {
+      display: flex; justify-content: center; gap: 8px;
+      padding: 6px 4px;
+    }
+    #controls button {
+      flex: 1 1 0; max-width: 112px;
+      min-height: 92px;             /* glasses minimum tap target */
+      font-size: 22px; font-weight: 600;
+      color: #cfefff; background: #101418;
+      border: 2px solid #2a3a44; border-radius: 14px;
+      transition: all 150ms ease;
+    }
+    #controls button:focus {
+      outline: none;
+      color: #ffffff;
+      border-color: #00d4ff;
+      box-shadow: 0 0 20px rgba(0, 212, 255, 0.45);
+      background: #0a2a36;
+    }
+    #hint {
+      height: 24px; line-height: 24px;
+      text-align: center; font-size: 16px; color: #6fb8d4;
+    }
+    #err {
+      height: 44px; padding: 0 12px;
+      text-align: center; font-size: 16px; color: #ff8f8f;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Loading player&hellip;</div>
+  <div id="player"></div>
+  <div id="vtitle"></div>
+  <div id="controls">
+    <button id="prev"   class="focusable">Prev</button>
+    <button id="toggle" class="focusable">Play</button>
+    <button id="next"   class="focusable">Next</button>
+    <button id="voldn"  class="focusable">Vol &minus;</button>
+    <button id="volup"  class="focusable">Vol +</button>
+  </div>
+  <div id="hint">Swipe to choose &middot; Pinch to select</div>
+  <div id="err"></div>
+
+  <script>
+    var PLAYLIST_ID = 'PLWuwaqqWR-30';
+    var SHUFFLE = false;            // set true for random order
+    var player = null;
+    var ready = false;
+
+    var ERR = {
+      2:   'invalid playlist or video id',
+      5:   'HTML5 player error',
+      100: 'video not found (skipping)',
+      101: 'embedding disabled by owner (skipping)',
+      150: 'embedding disabled by owner (skipping)',
+      153: 'Referer not sent: this browser is not sending the Referer header, so YouTube refuses the embed'
+    };
+
+    function $(id) { return document.getElementById(id); }
+    function setStatus(t) { $('status').textContent = t; }
+    function setErr(t)    { $('err').textContent = t; }
+
+    // Load the IFrame Player API.
+    (function () {
+      var tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      tag.onerror = function () { setErr('Could not load YouTube player script (network blocked?)'); };
+      document.head.appendChild(tag);
+    })();
+
+    // Global callback: the API calls this when loaded.
+    function onYouTubeIframeAPIReady() {
+      var vars = {
+        listType: 'playlist',
+        list: PLAYLIST_ID,
+        playsinline: 1,
+        controls: 0,          // playback is driven by the buttons below
+        rel: 0,
+        fs: 0,
+        disablekb: 1,
+        iv_load_policy: 3
+      };
+      if (location.protocol === 'https:' || location.protocol === 'http:') {
+        vars.origin = location.origin;
+        vars.widget_referrer = location.href;
+      }
+      player = new YT.Player('player', {
+        width: 600,
+        height: 338,
+        host: 'https://www.youtube-nocookie.com',
+        playerVars: vars,
+        events: {
+          onReady: function () {
+            ready = true;
+            player.setLoop(true);
+            if (SHUFFLE) { player.setShuffle(true); }
+            setStatus('Ready');
+            $('toggle').focus();
+          },
+          onStateChange: function (e) {
+            var d = player.getVideoData ? player.getVideoData() : null;
+            if (d && d.title) { $('vtitle').textContent = d.title; }
+            if (e.data === YT.PlayerState.PLAYING) {
+              $('toggle').textContent = 'Pause';
+              var i = player.getPlaylistIndex() + 1;
+              var list = player.getPlaylist() || [];
+              setStatus('Video ' + i + (list.length ? ' of ' + list.length : ''));
+              setErr('');
+            } else if (e.data === YT.PlayerState.PAUSED) {
+              $('toggle').textContent = 'Play';
+              setStatus('Paused');
+            } else if (e.data === YT.PlayerState.BUFFERING) {
+              setStatus('Buffering…');
+            } else if (e.data === YT.PlayerState.ENDED) {
+              $('toggle').textContent = 'Play';
+              setStatus('Playlist ended');
+            }
+          },
+          onError: function (e) {
+            // No devtools on glasses, so surface the code on the lens.
+            setErr('YouTube error ' + e.data + (ERR[e.data] ? ': ' + ERR[e.data] : ''));
+            if (e.data === 100 || e.data === 101 || e.data === 150) { player.nextVideo(); }
+          }
+        }
+      });
+    }
+
+    function guarded(fn) {
+      return function () {
+        if (!ready) { setStatus('Still loading…'); return; }
+        fn();
+      };
+    }
+    function togglePlay() {
+      if (player.getPlayerState() === YT.PlayerState.PLAYING) { player.pauseVideo(); }
+      else { player.playVideo(); }    // pinch is a user gesture, so audio is allowed
+    }
+
+    $('prev').addEventListener('click',   guarded(function () { player.previousVideo(); }));
+    $('toggle').addEventListener('click', guarded(togglePlay));
+    $('next').addEventListener('click',   guarded(function () { player.nextVideo(); }));
+    $('voldn').addEventListener('click',  guarded(function () { player.setVolume(Math.max(0, player.getVolume() - 10)); }));
+    $('volup').addEventListener('click',  guarded(function () { player.unMute(); player.setVolume(Math.min(100, player.getVolume() + 10)); }));
+
+    // MRBD input model: swipes arrive as arrow keys, index pinch/tap as Enter.
+    // Arrows move focus across the buttons; Enter activates the focused one.
+    function moveFocus(back) {
+      var f = Array.prototype.slice.call(document.querySelectorAll('.focusable'));
+      if (!f.length) { return; }
+      var i = f.indexOf(document.activeElement);
+      if (i === -1) { f[1].focus(); return; }   // default to Play/Pause
+      var n = back ? (i > 0 ? i - 1 : f.length - 1)
+                   : (i < f.length - 1 ? i + 1 : 0);
+      f[n].focus();
+    }
+    document.addEventListener('keydown', function (e) {
+      switch (e.key) {
+        case 'ArrowLeft':
+        case 'ArrowUp':    moveFocus(true);  break;
+        case 'ArrowRight':
+        case 'ArrowDown':  moveFocus(false); break;
+        case 'Enter':
+          if (document.activeElement && document.activeElement.classList &&
+              document.activeElement.classList.contains('focusable')) {
+            document.activeElement.click();
+          } else {
+            $('toggle').focus();
+          }
+          break;
+        default: return;   // don't preventDefault on unhandled keys
+      }
+      e.preventDefault();
+    });
+  </script>
+</body>
+</html>
