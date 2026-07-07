@@ -56,18 +56,7 @@
       height: 44px; padding: 0 12px;
       text-align: center; font-size: 16px; color: #ff8f8f;
     }
-    /* When every video is refused, #err becomes a focusable recovery action */
-    #err.action {
-      border: 2px solid #4a2a2a; border-radius: 12px;
-      color: #ffb3b3;
-    }
-    #err.action:focus {
-      outline: none;
-      color: #ffffff;
-      border-color: #00d4ff;
-      box-shadow: 0 0 20px rgba(0, 212, 255, 0.45);
-      background: #0a2a36;
-    }
+    #ytb { font-size: 17px; }   /* "YouTube" is long; keep it inside the narrower 6-up button */
   </style>
 </head>
 <body>
@@ -80,6 +69,7 @@
     <button id="next"   class="focusable">Next</button>
     <button id="voldn"  class="focusable">Vol &minus;</button>
     <button id="volup"  class="focusable">Vol +</button>
+    <button id="ytb"    class="focusable">YouTube</button>
   </div>
   <div id="hint">Swipe to choose &middot; Pinch to select</div>
   <div id="err"></div>
@@ -102,7 +92,7 @@
       153: 'Referer not sent: this browser is not sending the Referer header, so YouTube refuses the embed'
     };
     var errStreak = 0;              // consecutive refused videos
-    var MAX_SKIPS = 5;              // this many in a row = YouTube is blocking us, not the owners
+    var MAX_SKIPS = 3;              // this many in a row = YouTube is blocking us, not the owners
 
     function $(id) { return document.getElementById(id); }
     function setStatus(t) { $('status').textContent = t; }
@@ -181,25 +171,19 @@
       });
     }
 
-    // Every video refused in a row: almost certainly YouTube's bot wall.
-    // Signing in to YouTube once in this browser gives it the session
-    // cookies it wants, so turn #err into a pinchable link there.
+    // Every video refused in a row: YouTube is blocking this browser (bot
+    // wall), not individual videos. Point at the YouTube button — a real
+    // 92px control the glasses can select, unlike the small #err text —
+    // which escapes to youtube.com where the playlist plays without the
+    // embed restrictions (and where the user can sign in).
     function showBlocked() {
       setStatus('Playback blocked');
-      var el = $('err');
-      el.textContent = 'YouTube refused every video (bot check?). Pinch here to sign in to YouTube, then come back and press Play.';
-      el.classList.add('action', 'focusable');
-      el.setAttribute('tabindex', '0');
-      el.focus();
+      setErr('YouTube is blocking this player (bot check). Pinch the YouTube button to play the playlist there, or sign in and come back.');
+      $('ytb').focus();
     }
-    function clearBlocked() {
-      errStreak = 0;
-      var el = $('err');
-      el.classList.remove('action', 'focusable');
-      el.removeAttribute('tabindex');
-    }
-    $('err').addEventListener('click', function () {
-      if (this.classList.contains('action')) { location.href = 'https://www.youtube.com'; }
+    function clearBlocked() { errStreak = 0; }
+    $('ytb').addEventListener('click', function () {
+      location.href = 'https://www.youtube.com/playlist?list=' + PLAYLIST_ID;
     });
 
     function guarded(fn) {
