@@ -79,6 +79,7 @@
     var SHUFFLE = false;            // set true for random order
     var player = null;
     var ready = false;
+    var ctl = null;                 // active controller: YouTube or the local <video>
 
     // YouTube's bot check ("Sign in to confirm you're not a bot") also
     // surfaces through the IFrame API as error 150, so 101/150 do not
@@ -98,13 +99,91 @@
     function setStatus(t) { $('status').textContent = t; }
     function setErr(t)    { $('err').textContent = t; }
 
+    // Mode probe: a videos.json manifest in the repo switches the player to
+    // self-hosted files (see README). YouTube's bot wall currently blocks
+    // this browser outright — even youtube.com itself — and Google sign-in
+    // does not work on the glasses, so self-hosted is the path that cannot
+    // be blocked. No manifest → normal YouTube playlist mode.
+    if (typeof fetch !== 'function') {
+      initYouTube();
+    } else {
+      fetch('videos.json')
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (list) {
+          if (list && list.length) { initLocal(list); }
+          else { initYouTube(); }
+        });
+    }
+
     // Load the IFrame Player API.
-    (function () {
+    function initYouTube() {
       var tag = document.createElement('script');
       tag.src = 'https://www.youtube.com/iframe_api';
       tag.onerror = function () { setErr('Could not load YouTube player script (network blocked?)'); };
       document.head.appendChild(tag);
-    })();
+    }
+
+    // Self-hosted mode: same controls, no YouTube, no bot wall.
+    function initLocal(list) {
+      if (SHUFFLE) {
+        for (var s = list.length - 1; s > 0; s--) {
+          var r = Math.floor(Math.random() * (s + 1));
+          var t = list[s]; list[s] = list[r]; list[r] = t;
+        }
+      }
+      $('ytb').style.display = 'none';    // nothing to escape to in local mode
+
+      var v = document.createElement('video');
+      v.width = 600; v.height = 338;
+      v.setAttribute('playsinline', '');
+      v.preload = 'auto';
+      $('player').appendChild(v);
+
+      var idx = 0;
+      function tryPlay() {
+        var p = v.play();
+        // Before the first pinch the browser may veto autoplay; just wait.
+        if (p && p.catch) { p.catch(function () { $('toggle').textContent = 'Play'; setStatus('Press Play'); }); }
+      }
+      function load(i, autoplay) {
+        idx = ((i % list.length) + list.length) % list.length;
+        v.src = list[idx].src;
+        $('vtitle').textContent = list[idx].title || list[idx].src;
+        setStatus('Video ' + (idx + 1) + ' of ' + list.length);
+        if (autoplay) { tryPlay(); }
+      }
+
+      v.addEventListener('playing', function () {
+        errStreak = 0;
+        $('toggle').textContent = 'Pause';
+        setStatus('Video ' + (idx + 1) + ' of ' + list.length);
+        setErr('');
+      });
+      v.addEventListener('pause', function () {
+        if (!v.ended) { $('toggle').textContent = 'Play'; setStatus('Paused'); }
+      });
+      v.addEventListener('waiting', function () { setStatus('Buffering…'); });
+      v.addEventListener('ended', function () { load(idx + 1, true); });   // loop the playlist
+      v.addEventListener('error', function () {
+        setErr('Could not play "' + ($('vtitle').textContent) + '" (skipping)');
+        errStreak++;
+        if (errStreak < list.length) { load(idx + 1, true); }
+        else { setStatus('No playable videos'); $('toggle').textContent = 'Play'; }
+      });
+
+      ctl = {
+        prev:   function () { load(idx - 1, true); },
+        next:   function () { load(idx + 1, true); },
+        toggle: function () { if (v.paused || v.ended) { tryPlay(); } else { v.pause(); } },
+        voldn:  function () { v.volume = Math.max(0, Math.round(v.volume * 10 - 1) / 10); },
+        volup:  function () { v.muted = false; v.volume = Math.min(1, Math.round(v.volume * 10 + 1) / 10); }
+      };
+      ready = true;
+      load(0, false);
+      setStatus('Ready — ' + list.length + ' videos');
+      $('toggle').focus();
+    }
 
     // Global callback: the API calls this when loaded.
     function onYouTubeIframeAPIReady() {
@@ -132,6 +211,13 @@
         playerVars: vars,
         events: {
           onReady: function () {
+            ctl = {
+              prev:   function () { player.previousVideo(); },
+              next:   function () { player.nextVideo(); },
+              toggle: togglePlay,
+              voldn:  function () { player.setVolume(Math.max(0, player.getVolume() - 10)); },
+              volup:  function () { player.unMute(); player.setVolume(Math.min(100, player.getVolume() + 10)); }
+            };
             ready = true;
             player.setLoop(true);
             if (SHUFFLE) { player.setShuffle(true); }
@@ -201,16 +287,17 @@
       else { player.playVideo(); }    // pinch is a user gesture, so audio is allowed
     }
 
-    $('prev').addEventListener('click',   guarded(function () { clearBlocked(); player.previousVideo(); }));
-    $('toggle').addEventListener('click', guarded(function () { clearBlocked(); togglePlay(); }));
-    $('next').addEventListener('click',   guarded(function () { clearBlocked(); player.nextVideo(); }));
-    $('voldn').addEventListener('click',  guarded(function () { player.setVolume(Math.max(0, player.getVolume() - 10)); }));
-    $('volup').addEventListener('click',  guarded(function () { player.unMute(); player.setVolume(Math.min(100, player.getVolume() + 10)); }));
+    $('prev').addEventListener('click',   guarded(function () { clearBlocked(); ctl.prev(); }));
+    $('toggle').addEventListener('click', guarded(function () { clearBlocked(); ctl.toggle(); }));
+    $('next').addEventListener('click',   guarded(function () { clearBlocked(); ctl.next(); }));
+    $('voldn').addEventListener('click',  guarded(function () { ctl.voldn(); }));
+    $('volup').addEventListener('click',  guarded(function () { ctl.volup(); }));
 
     // MRBD input model: swipes arrive as arrow keys, index pinch/tap as Enter.
     // Arrows move focus across the buttons; Enter activates the focused one.
     function moveFocus(back) {
-      var f = Array.prototype.slice.call(document.querySelectorAll('.focusable'));
+      var f = Array.prototype.slice.call(document.querySelectorAll('.focusable'))
+        .filter(function (el) { return el.offsetParent !== null; });   // skip hidden (ytb in local mode)
       if (!f.length) { return; }
       var i = f.indexOf(document.activeElement);
       if (i === -1) { f[1].focus(); return; }   // default to Play/Pause
