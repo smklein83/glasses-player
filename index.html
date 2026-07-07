@@ -171,19 +171,23 @@
       });
     }
 
-    // Every video refused in a row: YouTube is blocking this browser (bot
-    // wall), not individual videos. Point at the YouTube button — a real
-    // 92px control the glasses can select, unlike the small #err text —
-    // which escapes to youtube.com where the playlist plays without the
-    // embed restrictions (and where the user can sign in).
+    // Every video refused in a row: YouTube's bot wall has flagged this
+    // browser or network, not individual videos — it even blocks the plain
+    // playlist page. The two known cures are a signed-in Google session and
+    // a different egress IP, so the YouTube button goes straight to Google
+    // sign-in and bounces back to the playlist (already signed in? it just
+    // passes through to the playlist).
     function showBlocked() {
       setStatus('Playback blocked');
-      setErr('YouTube is blocking this player (bot check). Pinch the YouTube button to play the playlist there, or sign in and come back.');
+      setErr('YouTube is blocking this browser (bot check). Pinch YouTube to sign in — or switch Wi-Fi/hotspot and retry.');
       $('ytb').focus();
     }
     function clearBlocked() { errStreak = 0; }
     $('ytb').addEventListener('click', function () {
-      location.href = 'https://www.youtube.com/playlist?list=' + PLAYLIST_ID;
+      var next = 'https://www.youtube.com/signin?action_handle_signin=true&next=' +
+                 encodeURIComponent('/playlist?list=' + PLAYLIST_ID);
+      location.href = 'https://accounts.google.com/ServiceLogin?service=youtube&passive=true&continue=' +
+                      encodeURIComponent(next);
     });
 
     function guarded(fn) {
