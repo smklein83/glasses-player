@@ -56,6 +56,18 @@
       height: 44px; padding: 0 12px;
       text-align: center; font-size: 16px; color: #ff8f8f;
     }
+    /* When every video is refused, #err becomes a focusable recovery action */
+    #err.action {
+      border: 2px solid #4a2a2a; border-radius: 12px;
+      color: #ffb3b3;
+    }
+    #err.action:focus {
+      outline: none;
+      color: #ffffff;
+      border-color: #00d4ff;
+      box-shadow: 0 0 20px rgba(0, 212, 255, 0.45);
+      background: #0a2a36;
+    }
   </style>
 </head>
 <body>
@@ -78,14 +90,19 @@
     var player = null;
     var ready = false;
 
+    // YouTube's bot check ("Sign in to confirm you're not a bot") also
+    // surfaces through the IFrame API as error 150, so 101/150 do not
+    // necessarily mean the owner disabled embedding.
     var ERR = {
       2:   'invalid playlist or video id',
       5:   'HTML5 player error',
       100: 'video not found (skipping)',
-      101: 'embedding disabled by owner (skipping)',
-      150: 'embedding disabled by owner (skipping)',
+      101: 'playback refused (embed disabled or bot check) — skipping',
+      150: 'playback refused (embed disabled or bot check) — skipping',
       153: 'Referer not sent: this browser is not sending the Referer header, so YouTube refuses the embed'
     };
+    var errStreak = 0;              // consecutive refused videos
+    var MAX_SKIPS = 5;              // this many in a row = YouTube is blocking us, not the owners
 
     function $(id) { return document.getElementById(id); }
     function setStatus(t) { $('status').textContent = t; }
@@ -118,7 +135,10 @@
       player = new YT.Player('player', {
         width: 600,
         height: 338,
-        host: 'https://www.youtube-nocookie.com',
+        // www.youtube.com, NOT youtube-nocookie.com: privacy-enhanced mode
+        // strips cookies, and cookie-less embeds trip YouTube's "confirm
+        // you're not a bot" wall, which then reports error 150 on every video.
+        host: 'https://www.youtube.com',
         playerVars: vars,
         events: {
           onReady: function () {
@@ -136,6 +156,7 @@
               var i = player.getPlaylistIndex() + 1;
               var list = player.getPlaylist() || [];
               setStatus('Video ' + i + (list.length ? ' of ' + list.length : ''));
+              clearBlocked();
               setErr('');
             } else if (e.data === YT.PlayerState.PAUSED) {
               $('toggle').textContent = 'Play';
@@ -150,11 +171,36 @@
           onError: function (e) {
             // No devtools on glasses, so surface the code on the lens.
             setErr('YouTube error ' + e.data + (ERR[e.data] ? ': ' + ERR[e.data] : ''));
-            if (e.data === 100 || e.data === 101 || e.data === 150) { player.nextVideo(); }
+            if (e.data === 100 || e.data === 101 || e.data === 150) {
+              errStreak++;
+              if (errStreak < MAX_SKIPS) { player.nextVideo(); }
+              else { showBlocked(); }   // stop skip-looping the whole playlist
+            }
           }
         }
       });
     }
+
+    // Every video refused in a row: almost certainly YouTube's bot wall.
+    // Signing in to YouTube once in this browser gives it the session
+    // cookies it wants, so turn #err into a pinchable link there.
+    function showBlocked() {
+      setStatus('Playback blocked');
+      var el = $('err');
+      el.textContent = 'YouTube refused every video (bot check?). Pinch here to sign in to YouTube, then come back and press Play.';
+      el.classList.add('action', 'focusable');
+      el.setAttribute('tabindex', '0');
+      el.focus();
+    }
+    function clearBlocked() {
+      errStreak = 0;
+      var el = $('err');
+      el.classList.remove('action', 'focusable');
+      el.removeAttribute('tabindex');
+    }
+    $('err').addEventListener('click', function () {
+      if (this.classList.contains('action')) { location.href = 'https://www.youtube.com'; }
+    });
 
     function guarded(fn) {
       return function () {
@@ -167,9 +213,9 @@
       else { player.playVideo(); }    // pinch is a user gesture, so audio is allowed
     }
 
-    $('prev').addEventListener('click',   guarded(function () { player.previousVideo(); }));
-    $('toggle').addEventListener('click', guarded(togglePlay));
-    $('next').addEventListener('click',   guarded(function () { player.nextVideo(); }));
+    $('prev').addEventListener('click',   guarded(function () { clearBlocked(); player.previousVideo(); }));
+    $('toggle').addEventListener('click', guarded(function () { clearBlocked(); togglePlay(); }));
+    $('next').addEventListener('click',   guarded(function () { clearBlocked(); player.nextVideo(); }));
     $('voldn').addEventListener('click',  guarded(function () { player.setVolume(Math.max(0, player.getVolume() - 10)); }));
     $('volup').addEventListener('click',  guarded(function () { player.unMute(); player.setVolume(Math.min(100, player.getVolume() + 10)); }));
 
