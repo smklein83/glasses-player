@@ -56,7 +56,6 @@
       height: 44px; padding: 0 12px;
       text-align: center; font-size: 16px; color: #ff8f8f;
     }
-    #ytb { font-size: 17px; }   /* "YouTube" is long; keep it inside the narrower 6-up button */
   </style>
 </head>
 <body>
@@ -67,9 +66,9 @@
     <button id="prev"   class="focusable">Prev</button>
     <button id="toggle" class="focusable">Play</button>
     <button id="next"   class="focusable">Next</button>
-    <button id="voldn"  class="focusable">Vol &minus;</button>
-    <button id="volup"  class="focusable">Vol +</button>
-    <button id="ytb"    class="focusable">YouTube</button>
+    <button id="back15" class="focusable">&lt;15</button>
+    <button id="fwd30"  class="focusable">&gt;30</button>
+    <button id="speed2" class="focusable">2x</button>
   </div>
   <div id="hint">Swipe to choose &middot; Pinch to select</div>
   <div id="err"></div>
@@ -132,8 +131,6 @@
           var t = list[s]; list[s] = list[r]; list[r] = t;
         }
       }
-      $('ytb').style.display = 'none';    // nothing to escape to in local mode
-
       var v = document.createElement('video');
       v.width = 600; v.height = 338;
       v.setAttribute('playsinline', '');
@@ -173,11 +170,16 @@
       });
 
       ctl = {
-        prev:   function () { load(idx - 1, true); },
-        next:   function () { load(idx + 1, true); },
-        toggle: function () { if (v.paused || v.ended) { tryPlay(); } else { v.pause(); } },
-        voldn:  function () { v.volume = Math.max(0, Math.round(v.volume * 10 - 1) / 10); },
-        volup:  function () { v.muted = false; v.volume = Math.min(1, Math.round(v.volume * 10 + 1) / 10); }
+        prev:    function () { load(idx - 1, true); },
+        next:    function () { load(idx + 1, true); },
+        toggle:  function () { if (v.paused || v.ended) { tryPlay(); } else { v.pause(); } },
+        back15:  function () { v.currentTime = Math.max(0, v.currentTime - 15); },
+        fwd30:   function () {
+          var target = v.currentTime + 30;
+          if (isFinite(v.duration)) { target = Math.min(v.duration, target); }
+          v.currentTime = target;
+        },
+        speed2:  function () { v.playbackRate = 2; setStatus('Speed 2x'); }
       };
       ready = true;
       load(0, false);
@@ -212,11 +214,19 @@
         events: {
           onReady: function () {
             ctl = {
-              prev:   function () { player.previousVideo(); },
-              next:   function () { player.nextVideo(); },
-              toggle: togglePlay,
-              voldn:  function () { player.setVolume(Math.max(0, player.getVolume() - 10)); },
-              volup:  function () { player.unMute(); player.setVolume(Math.min(100, player.getVolume() + 10)); }
+              prev:    function () { player.previousVideo(); },
+              next:    function () { player.nextVideo(); },
+              toggle:  togglePlay,
+              back15:  function () {
+                player.seekTo(Math.max(0, player.getCurrentTime() - 15), true);
+              },
+              fwd30:   function () {
+                var target = player.getCurrentTime() + 30;
+                var duration = player.getDuration();
+                if (duration) { target = Math.min(duration, target); }
+                player.seekTo(target, true);
+              },
+              speed2:  function () { player.setPlaybackRate(2); setStatus('Speed 2x'); }
             };
             ready = true;
             player.setLoop(true);
@@ -260,21 +270,13 @@
     // Every video refused in a row: YouTube's bot wall has flagged this
     // browser or network, not individual videos — it even blocks the plain
     // playlist page. The two known cures are a signed-in Google session and
-    // a different egress IP, so the YouTube button goes straight to Google
-    // sign-in and bounces back to the playlist (already signed in? it just
-    // passes through to the playlist).
+    // a different egress IP.
     function showBlocked() {
       setStatus('Playback blocked');
-      setErr('YouTube is blocking this browser (bot check). Pinch YouTube to sign in — or switch Wi-Fi/hotspot and retry.');
-      $('ytb').focus();
+      setErr('YouTube is blocking this browser (bot check). Switch Wi-Fi/hotspot and retry.');
+      $('toggle').focus();
     }
     function clearBlocked() { errStreak = 0; }
-    $('ytb').addEventListener('click', function () {
-      var next = 'https://www.youtube.com/signin?action_handle_signin=true&next=' +
-                 encodeURIComponent('/playlist?list=' + PLAYLIST_ID);
-      location.href = 'https://accounts.google.com/ServiceLogin?service=youtube&passive=true&continue=' +
-                      encodeURIComponent(next);
-    });
 
     function guarded(fn) {
       return function () {
@@ -290,14 +292,15 @@
     $('prev').addEventListener('click',   guarded(function () { clearBlocked(); ctl.prev(); }));
     $('toggle').addEventListener('click', guarded(function () { clearBlocked(); ctl.toggle(); }));
     $('next').addEventListener('click',   guarded(function () { clearBlocked(); ctl.next(); }));
-    $('voldn').addEventListener('click',  guarded(function () { ctl.voldn(); }));
-    $('volup').addEventListener('click',  guarded(function () { ctl.volup(); }));
+    $('back15').addEventListener('click', guarded(function () { ctl.back15(); }));
+    $('fwd30').addEventListener('click',  guarded(function () { ctl.fwd30(); }));
+    $('speed2').addEventListener('click', guarded(function () { ctl.speed2(); }));
 
     // MRBD input model: swipes arrive as arrow keys, index pinch/tap as Enter.
     // Arrows move focus across the buttons; Enter activates the focused one.
     function moveFocus(back) {
       var f = Array.prototype.slice.call(document.querySelectorAll('.focusable'))
-        .filter(function (el) { return el.offsetParent !== null; });   // skip hidden (ytb in local mode)
+        .filter(function (el) { return el.offsetParent !== null; });
       if (!f.length) { return; }
       var i = f.indexOf(document.activeElement);
       if (i === -1) { f[1].focus(); return; }   // default to Play/Pause

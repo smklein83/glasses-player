@@ -41,9 +41,10 @@ Put a `videos.json` at the repo root listing the files to play, in order:
 ```
 
 Then commit the files under `videos/`. On the next load the player switches
-to them automatically: same Prev / Play / Next / volume buttons, playlist
-loops at the end, unplayable entries are skipped. Delete `videos.json` to
-go back to YouTube mode.
+to them automatically with the same controls: Prev, Play/Pause, Next,
+15 seconds back, 30 seconds forward, and 2x playback speed. The playlist
+loops at the end and unplayable entries are skipped. Delete `videos.json`
+to go back to YouTube mode.
 
 Practical notes:
 
