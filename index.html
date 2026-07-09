@@ -179,7 +179,11 @@
           if (isFinite(v.duration)) { target = Math.min(v.duration, target); }
           v.currentTime = target;
         },
-        speed2:  function () { v.playbackRate = 2; setStatus('Speed 2x'); }
+        speed2:  function () {
+          var rate = v.playbackRate === 2 ? 1 : 2;
+          v.playbackRate = rate;
+          setStatus('Speed ' + rate + 'x');
+        }
       };
       ready = true;
       load(0, false);
@@ -226,7 +230,11 @@
                 if (duration) { target = Math.min(duration, target); }
                 player.seekTo(target, true);
               },
-              speed2:  function () { player.setPlaybackRate(2); setStatus('Speed 2x'); }
+              speed2:  function () {
+                var rate = player.getPlaybackRate() === 2 ? 1 : 2;
+                player.setPlaybackRate(rate);
+                setStatus('Speed ' + rate + 'x');
+              }
             };
             ready = true;
             player.setLoop(true);
