@@ -5,12 +5,24 @@ buttons (swipe to choose, pinch to select), status and errors rendered on
 the lens. Serve it over HTTPS (e.g. GitHub Pages) and open it in the
 glasses browser.
 
-It has two modes, chosen automatically at load:
+## Two screens
 
-| Mode | Trigger | Plays |
-|------|---------|-------|
-| YouTube | no `videos.json` in the repo | the playlist in `PLAYLIST_ID` via the IFrame API |
-| Self-hosted | `videos.json` exists | your own video files, same UI |
+1. **Choose a playlist** — the screen you land on. It lists every playlist
+   in the `PLAYLISTS` array (swipe to move, pinch to select).
+2. **Player** — the selected playlist's videos, with the usual controls:
+   Prev, Play/Pause, Next, 15 seconds back, 30 seconds forward, and a 2x
+   speed toggle.
+
+**Press Prev twice within 2 seconds to jump back to the playlist screen.**
+A single Prev still just goes to the previous video.
+
+Each playlist is either a YouTube playlist or a set of self-hosted files —
+both use the same player UI:
+
+| Kind | Entry shape | Plays |
+|------|-------------|-------|
+| YouTube | `{ name, list }` | the playlist `list` via the IFrame API |
+| Self-hosted | `{ name, videos: [...] }` | your own video files |
 
 ## YouTube mode — currently walled off on the glasses
 
@@ -26,8 +38,9 @@ row), stops skip-looping, and says so on the lens.
 
 Config knobs at the top of the script in `index.html`:
 
-- `PLAYLIST_ID` — the YouTube playlist to play
-- `SHUFFLE` — `true` for random order (both modes)
+- `PLAYLISTS` — the list of playlists shown on the selection screen. Add a
+  `{ name: 'My Mix', list: 'PLxxxxxxxx' }` entry for each YouTube playlist.
+- `SHUFFLE` — `true` for random order (both kinds)
 
 ## Self-hosted mode — cannot be blocked
 
@@ -40,11 +53,15 @@ Put a `videos.json` at the repo root listing the files to play, in order:
 ]
 ```
 
-Then commit the files under `videos/`. On the next load the player switches
-to them automatically with the same controls: Prev, Play/Pause, Next,
-15 seconds back, 30 seconds forward, and a 2x speed toggle. Press 2x again
-to return to normal speed. The playlist loops at the end and unplayable
-entries are skipped. Delete `videos.json` to go back to YouTube mode.
+Then commit the files under `videos/`. On the next load a **Self-hosted**
+entry appears on the selection screen alongside the YouTube playlists, with
+the same controls. Press 2x again to return to normal speed. The playlist
+loops at the end and unplayable entries are skipped. Delete `videos.json`
+to drop the Self-hosted entry.
+
+To hard-code self-hosted playlists instead of using `videos.json`, add
+`{ name: '...', videos: [ { title, src }, ... ] }` entries directly to
+`PLAYLISTS`.
 
 Practical notes:
 
