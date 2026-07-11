@@ -117,19 +117,29 @@
   </div>
 
   <script>
-    // Each entry is either a YouTube playlist ({ name, list }) or a set of
-    // self-hosted files ({ name, videos: [{title, src}, ...] }). Add as many
-    // as you like — they all show up on the selection screen.
+    // Each entry is a YouTube playlist ({ name, list }) or self-hosted files
+    // ({ name, videos: [{title, src}, ...] }). Add `consume: true` to make a
+    // playlist drop videos you finish to the end (skipped/unfinished ones
+    // stay). Without it a playlist is retained and loops forever.
     var PLAYLISTS = [
-      { name: 'Tech',    list: 'PLbnyQ6wMjZrE' },
-      { name: 'Flight',  list: 'PLXOhq7WErQjs' },
-      { name: 'Glasses', list: 'PLWuwaqqWR-30' }
+      { name: 'Tech',    list: 'PLbnyQ6wMjZrE', consume: true },
+      { name: 'Flight',  list: 'PLXOhq7WErQjs', consume: true },
+      { name: 'Glasses', list: 'PLWuwaqqWR-30' },
+      // Not-mine playlists — retain (never dropped). consume is local-only and
+      // never edits YouTube, so it is safe to add here too if you ever want it.
+      { name: 'AI Headline News', list: 'PLRYSuzHGhXPnXgy2FJDUV2FajmYGGl5d2' },
+      { name: 'AI Breakdown',     list: 'PLRYSuzHGhXPmKnOpd-f588cNNmTe2S9FP' },
+      { name: 'All In Podcast',   list: 'PLn5MTSAqaf8peDZQ57QkJBzewJU1aUokl' },
+      { name: 'The Argument',     list: 'PLrfqnYenbG0YMrYXUu3Xrg0oEvXqcOk9W' },
+      { name: 'Ezra Klein',       list: 'PL4n3AtGdRxJgywUZQYUk3k2-HXIQ_fIHE' },
+      { name: 'Econ 102',         list: 'PLR1HfbuwOI0Vq_XMNRP2NXbNOKGN629-A' }
     ];
     var SHUFFLE = false;            // set true for random order
 
     var player = null;              // active YouTube player (null in local mode)
     var ready = false;
     var ctl = null;                 // active controller: YouTube or the local <video>
+    var managed = null;             // active consume-queue (null on retain/native playlists)
     var lastPrev = 0;               // timestamp of the previous Prev press
 
     // YouTube's bot check ("Sign in to confirm you're not a bot") also
@@ -159,6 +169,67 @@
       $('player-screen').hidden   = (which !== 'player');
     }
 
+    // ---------- Finished-video memory (consume playlists) ----------
+    // Videos you finish in a consume playlist are remembered here so they stay
+    // gone across reloads. Retain playlists are never recorded. To bring a
+    // playlist's finished videos back, run glassesForget('<playlist id>') in
+    // the console (the id is the `list`/`name` from PLAYLISTS).
+    function consumedKey(k) { return 'glasses:consumed:' + k; }
+    function loadConsumed(k) {
+      try { return JSON.parse(localStorage.getItem(consumedKey(k))) || {}; }
+      catch (e) { return {}; }
+    }
+    function saveConsumed(k, map) {
+      try { localStorage.setItem(consumedKey(k), JSON.stringify(map)); } catch (e) {}
+    }
+    window.glassesForget = function (k) {
+      try { localStorage.removeItem(consumedKey(k)); } catch (e) {}
+    };
+
+    // ---------- Shared play-queue: order, skipping, consume-on-finish ----------
+    // items: [{ key, ... }] where key is a stable id (YouTube video id or file
+    // src). The caller supplies play(item, autoplay), finished(), status(text).
+    // ended() is what enforces the rule: only finishing a video consumes it.
+    function makeQueue(items, opts) {
+      var consume  = !!opts.consume;
+      var consumed = consume ? loadConsumed(opts.storeKey) : {};
+      var live     = items.filter(function (it) { return !consumed[it.key]; });
+      var pos = 0, current = null, q;
+
+      function label() {
+        return live.length ? ('Video ' + (pos + 1) + ' of ' + live.length) : 'Playlist finished';
+      }
+      function playAt(autoplay) {
+        if (!live.length) { current = null; opts.finished(); return; }
+        if (pos < 0) { pos = live.length - 1; }
+        if (pos >= live.length) { pos = 0; }
+        current = live[pos];
+        opts.play(current, autoplay);
+        opts.status(label());
+      }
+
+      q = {
+        start: function () { pos = 0; playAt(false); },
+        next:  function () { if (live.length) { pos = (pos + 1) % live.length; } playAt(true); },
+        prev:  function () { if (live.length) { pos = (pos - 1 + live.length) % live.length; } playAt(true); },
+        // The current video played through to the very end.
+        ended: function () {
+          if (consume && current) {
+            consumed[current.key] = 1;
+            saveConsumed(opts.storeKey, consumed);
+            live.splice(pos, 1);               // drop the finished video
+            if (pos >= live.length) { pos = 0; }
+            playAt(true);
+          } else {
+            q.next();                          // retain: just advance (loops)
+          }
+        },
+        label:     label,
+        remaining: function () { return live.length; }
+      };
+      return q;
+    }
+
     // ---------- Playlist selection screen ----------
 
     function renderPlaylists() {
@@ -181,13 +252,13 @@
       if (!pl) { return; }
       teardown();
       showScreen('player');
-      ready = false; errStreak = 0; ctl = null; lastPrev = 0;
+      ready = false; errStreak = 0; ctl = null; managed = null; lastPrev = 0;
       $('vtitle').textContent = '';
       $('toggle').textContent = 'Play';
       setErr('');
       setStatus('Loading…');
-      if (pl.videos && pl.videos.length) { initLocal(pl.videos); }
-      else { createYouTubePlayer(pl.list); }
+      if (pl.videos && pl.videos.length) { initLocal(pl.videos, pl); }
+      else { createYouTubePlayer(pl); }
     }
 
     // Prev-pressed-twice escape hatch, and the Back path in general.
@@ -202,6 +273,7 @@
     function teardown() {
       ready = false;
       ctl = null;
+      managed = null;
       if (player) {
         try { player.destroy(); } catch (e) {}
         player = null;
@@ -232,10 +304,27 @@
       if (pendingYT) { var f = pendingYT; pendingYT = null; f(); }
     }
 
-    function createYouTubePlayer(listId) {
+    function togglePlay() {
+      if (player.getPlayerState() === YT.PlayerState.PLAYING) { player.pauseVideo(); }
+      else { player.playVideo(); }    // pinch is a user gesture, so audio is allowed
+    }
+    function ytBack15() { player.seekTo(Math.max(0, player.getCurrentTime() - 15), true); }
+    function ytFwd30()  {
+      var target = player.getCurrentTime() + 30;
+      var duration = player.getDuration();
+      if (duration) { target = Math.min(duration, target); }
+      player.seekTo(target, true);
+    }
+    function ytSpeed2() {
+      var rate = player.getPlaybackRate() === 2 ? 1 : 2;
+      player.setPlaybackRate(rate);
+      setStatus('Speed ' + rate + 'x');
+    }
+
+    function createYouTubePlayer(pl) {
       // Selected before the API finished loading? Queue it.
       if (!ytApiReady) {
-        pendingYT = function () { createYouTubePlayer(listId); };
+        pendingYT = function () { createYouTubePlayer(pl); };
         ensureYouTubeApi();
         return;
       }
@@ -246,7 +335,7 @@
 
       var vars = {
         listType: 'playlist',
-        list: listId,
+        list: pl.list,
         playsinline: 1,
         controls: 0,          // playback is driven by the buttons below
         rel: 0,
@@ -268,39 +357,28 @@
         playerVars: vars,
         events: {
           onReady: function () {
-            ctl = {
-              prev:    function () { player.previousVideo(); },
-              next:    function () { player.nextVideo(); },
-              toggle:  togglePlay,
-              back15:  function () {
-                player.seekTo(Math.max(0, player.getCurrentTime() - 15), true);
-              },
-              fwd30:   function () {
-                var target = player.getCurrentTime() + 30;
-                var duration = player.getDuration();
-                if (duration) { target = Math.min(duration, target); }
-                player.seekTo(target, true);
-              },
-              speed2:  function () {
-                var rate = player.getPlaybackRate() === 2 ? 1 : 2;
-                player.setPlaybackRate(rate);
-                setStatus('Speed ' + rate + 'x');
-              }
-            };
-            ready = true;
-            player.setLoop(true);
-            if (SHUFFLE) { player.setShuffle(true); }
-            setStatus('Ready');
-            $('toggle').focus();
+            // Retain playlists keep YouTube's own looping playlist navigation.
+            // Consume playlists take over so we can drop finished videos and
+            // so ENDED fires reliably per video (it doesn't inside a playlist).
+            if (pl.consume) {
+              setStatus('Loading playlist…');
+              waitForPlaylistIds(pl, 0);
+            } else {
+              setupNativeYT();
+            }
           },
           onStateChange: function (e) {
             var d = player.getVideoData ? player.getVideoData() : null;
             if (d && d.title) { $('vtitle').textContent = d.title; }
             if (e.data === YT.PlayerState.PLAYING) {
               $('toggle').textContent = 'Pause';
-              var i = player.getPlaylistIndex() + 1;
-              var list = player.getPlaylist() || [];
-              setStatus('Video ' + i + (list.length ? ' of ' + list.length : ''));
+              if (managed) {
+                setStatus(managed.label());
+              } else {
+                var i = player.getPlaylistIndex() + 1;
+                var list = player.getPlaylist() || [];
+                setStatus('Video ' + i + (list.length ? ' of ' + list.length : ''));
+              }
               clearBlocked();
               setErr('');
             } else if (e.data === YT.PlayerState.PAUSED) {
@@ -309,8 +387,12 @@
             } else if (e.data === YT.PlayerState.BUFFERING) {
               setStatus('Buffering…');
             } else if (e.data === YT.PlayerState.ENDED) {
-              $('toggle').textContent = 'Play';
-              setStatus('Playlist ended');
+              if (managed) {
+                managed.ended();          // finished to the end → consume + advance
+              } else {
+                $('toggle').textContent = 'Play';
+                setStatus('Playlist ended');
+              }
             }
           },
           onError: function (e) {
@@ -318,7 +400,8 @@
             setErr('YouTube error ' + e.data + (ERR[e.data] ? ': ' + ERR[e.data] : ''));
             if (e.data === 100 || e.data === 101 || e.data === 150) {
               errStreak++;
-              if (errStreak < MAX_SKIPS) { player.nextVideo(); }
+              // An unplayable video is not a finished one — skip without consuming.
+              if (errStreak < MAX_SKIPS) { if (managed) { managed.next(); } else { player.nextVideo(); } }
               else { showBlocked(); }   // stop skip-looping the whole playlist
             }
           }
@@ -326,11 +409,76 @@
       });
     }
 
+    // Retain playlist: YouTube drives order and looping, nothing is dropped.
+    function setupNativeYT() {
+      ctl = {
+        prev:   function () { player.previousVideo(); },
+        next:   function () { player.nextVideo(); },
+        toggle: togglePlay,
+        back15: ytBack15,
+        fwd30:  ytFwd30,
+        speed2: ytSpeed2
+      };
+      ready = true;
+      player.setLoop(true);
+      if (SHUFFLE) { player.setShuffle(true); }
+      setStatus('Ready');
+      $('toggle').focus();
+    }
+
+    // Consume playlist: read the playlist's video ids, then drive them one at a
+    // time so finished videos can be dropped. getPlaylist() is empty until the
+    // playlist metadata loads, so poll briefly.
+    function waitForPlaylistIds(pl, tries) {
+      var ids = (player.getPlaylist && player.getPlaylist()) || [];
+      if (ids.length) { initManagedYT(pl, ids); return; }
+      if (tries < 25) { setTimeout(function () { waitForPlaylistIds(pl, tries + 1); }, 200); return; }
+      // Couldn't read the list — fall back to plain looping so the app still works.
+      setErr('Could not read playlist — auto-remove off');
+      setupNativeYT();
+    }
+
+    function initManagedYT(pl, ids) {
+      if (SHUFFLE) {
+        ids = ids.slice();
+        for (var s = ids.length - 1; s > 0; s--) {
+          var r = Math.floor(Math.random() * (s + 1));
+          var t = ids[s]; ids[s] = ids[r]; ids[r] = t;
+        }
+      }
+      var items = ids.map(function (id) { return { key: id }; });
+      managed = makeQueue(items, {
+        consume:  true,
+        storeKey: pl.list,
+        play: function (item, autoplay) {
+          if (autoplay) { player.loadVideoById(item.key); }
+          else { player.cueVideoById(item.key); }
+        },
+        finished: function () {
+          $('vtitle').textContent = '';
+          $('toggle').textContent = 'Play';
+          setStatus('Playlist finished');
+        },
+        status: function (text) { setStatus(text); }
+      });
+      ctl = {
+        prev:   function () { managed.prev(); },
+        next:   function () { managed.next(); },
+        toggle: togglePlay,
+        back15: ytBack15,
+        fwd30:  ytFwd30,
+        speed2: ytSpeed2
+      };
+      ready = true;
+      managed.start();          // cues the first remaining video
+      $('toggle').focus();
+    }
+
     // ---------- Self-hosted mode: same controls, no YouTube, no bot wall ----------
 
-    function initLocal(list) {
+    function initLocal(list, pl) {
+      list = list.slice();
       if (SHUFFLE) {
-        list = list.slice();
         for (var s = list.length - 1; s > 0; s--) {
           var r = Math.floor(Math.random() * (s + 1));
           var t = list[s]; list[s] = list[r]; list[r] = t;
@@ -342,41 +490,48 @@
       v.preload = 'auto';
       $('player').appendChild(v);
 
-      var idx = 0;
       function tryPlay() {
         var p = v.play();
         // Before the first pinch the browser may veto autoplay; just wait.
         if (p && p.catch) { p.catch(function () { $('toggle').textContent = 'Play'; setStatus('Press Play'); }); }
       }
-      function load(i, autoplay) {
-        idx = ((i % list.length) + list.length) % list.length;
-        v.src = list[idx].src;
-        $('vtitle').textContent = list[idx].title || list[idx].src;
-        setStatus('Video ' + (idx + 1) + ' of ' + list.length);
-        if (autoplay) { tryPlay(); }
-      }
+
+      var items = list.map(function (x) { return { key: x.src, title: x.title || x.src, src: x.src }; });
+      var q = makeQueue(items, {
+        consume:  !!(pl && pl.consume),
+        storeKey: (pl && pl.name) || 'local',
+        play: function (item, autoplay) {
+          v.src = item.src;
+          $('vtitle').textContent = item.title;
+          setErr('');
+          if (autoplay) { tryPlay(); }
+        },
+        finished: function () { setStatus('Playlist finished'); $('toggle').textContent = 'Play'; },
+        status: function (text) { setStatus(text); }
+      });
 
       v.addEventListener('playing', function () {
         errStreak = 0;
         $('toggle').textContent = 'Pause';
-        setStatus('Video ' + (idx + 1) + ' of ' + list.length);
+        setStatus(q.label());
         setErr('');
       });
       v.addEventListener('pause', function () {
         if (!v.ended) { $('toggle').textContent = 'Play'; setStatus('Paused'); }
       });
       v.addEventListener('waiting', function () { setStatus('Buffering…'); });
-      v.addEventListener('ended', function () { load(idx + 1, true); });   // loop the playlist
+      v.addEventListener('ended', function () { q.ended(); });   // finished → consume/advance
       v.addEventListener('error', function () {
         setErr('Could not play "' + ($('vtitle').textContent) + '" (skipping)');
         errStreak++;
-        if (errStreak < list.length) { load(idx + 1, true); }
+        // Unplayable is not finished — skip without consuming.
+        if (errStreak < items.length) { q.next(); }
         else { setStatus('No playable videos'); $('toggle').textContent = 'Play'; }
       });
 
       ctl = {
-        prev:    function () { load(idx - 1, true); },
-        next:    function () { load(idx + 1, true); },
+        prev:    function () { q.prev(); },
+        next:    function () { q.next(); },
         toggle:  function () { if (v.paused || v.ended) { tryPlay(); } else { v.pause(); } },
         back15:  function () { v.currentTime = Math.max(0, v.currentTime - 15); },
         fwd30:   function () {
@@ -391,8 +546,7 @@
         }
       };
       ready = true;
-      load(0, false);
-      setStatus('Ready — ' + list.length + ' videos');
+      q.start();               // loads the first remaining video (no autoplay)
       $('toggle').focus();
     }
 
@@ -413,13 +567,9 @@
         fn();
       };
     }
-    function togglePlay() {
-      if (player.getPlayerState() === YT.PlayerState.PLAYING) { player.pauseVideo(); }
-      else { player.playVideo(); }    // pinch is a user gesture, so audio is allowed
-    }
 
     // Prev twice within 2 seconds = escape back to the playlist screen.
-    // Otherwise Prev just goes to the previous video, as usual.
+    // Otherwise Prev just goes to the previous video (a skip, so it is kept).
     $('prev').addEventListener('click', guarded(function () {
       var now = Date.now();
       if (now - lastPrev <= 2000) { lastPrev = 0; backToPlaylists(); return; }

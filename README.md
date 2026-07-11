@@ -24,6 +24,26 @@ both use the same player UI:
 | YouTube | `{ name, list }` | the playlist `list` via the IFrame API |
 | Self-hosted | `{ name, videos: [...] }` | your own video files |
 
+## Auto-remove finished videos (`consume`)
+
+Add `consume: true` to a playlist entry and any video you play **to the
+end** drops out of that playlist's rotation. Skipping (Prev/Next) or leaving
+a video unfinished keeps it. Without the flag a playlist is retained and
+loops forever.
+
+**This never touches YouTube.** It does not sign in and it cannot edit the
+real playlist — finished video ids are just written to the glasses browser's
+`localStorage` and skipped locally. So it works whether or not you are signed
+in, and whether or not you own the playlist (nothing on YouTube is modified).
+The flip side: "removed" means removed from this player on this device;
+clearing the browser's storage brings everything back, and it does not sync
+across devices. If `localStorage` is unavailable the feature quietly degrades
+to session-only (no error, still nothing modified on YouTube).
+
+To bring a `consume` playlist's finished videos back, run
+`glassesForget('<playlist id>')` in the browser console (the id is the
+`list`/`name` from `PLAYLISTS`).
+
 ## YouTube mode — currently walled off on the glasses
 
 YouTube's anti-bot system ("Sign in to confirm you're not a bot") has been
@@ -39,7 +59,8 @@ row), stops skip-looping, and says so on the lens.
 Config knobs at the top of the script in `index.html`:
 
 - `PLAYLISTS` — the list of playlists shown on the selection screen. Add a
-  `{ name: 'My Mix', list: 'PLxxxxxxxx' }` entry for each YouTube playlist.
+  `{ name: 'My Mix', list: 'PLxxxxxxxx' }` entry for each YouTube playlist;
+  add `consume: true` to auto-remove finished videos (see above).
 - `SHUFFLE` — `true` for random order (both kinds)
 
 ## Self-hosted mode — cannot be blocked
