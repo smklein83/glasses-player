@@ -61,11 +61,15 @@ Config knobs at the top of the script in `index.html`:
 - `PLAYLISTS` — the list of playlists shown on the selection screen. Add a
   `{ name: 'My Mix', list: 'PLxxxxxxxx' }` entry for each YouTube playlist;
   add `consume: true` to auto-remove finished videos (see above).
-- `SHUFFLE` — `true` for random order (both kinds)
+- `REVERSE` — `true` (the default) plays newest-first: the last videos added
+  to a playlist play before older ones (16 → 15 → …). Set `false` for the
+  original oldest-first order. (both kinds)
+- `SHUFFLE` — `true` for random order (overrides `REVERSE`; both kinds)
 
 ## Self-hosted mode — cannot be blocked
 
-Put a `videos.json` at the repo root listing the files to play, in order:
+Put a `videos.json` at the repo root listing the files (with the default
+`REVERSE`, the last one listed plays first):
 
 ```json
 [

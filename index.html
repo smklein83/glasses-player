@@ -139,6 +139,7 @@
       { name: 'Econ 102',         list: 'PLR1HfbuwOI0Vq_XMNRP2NXbNOKGN629-A' }
     ];
     var SHUFFLE = false;            // set true for random order
+    var REVERSE = true;             // play newest-first: last added -> first played
 
     var player = null;              // active YouTube player (null in local mode)
     var ready = false;
@@ -361,15 +362,13 @@
         playerVars: vars,
         events: {
           onReady: function () {
-            // Retain playlists keep YouTube's own looping playlist navigation.
-            // Consume playlists take over so we can drop finished videos and
-            // so ENDED fires reliably per video (it doesn't inside a playlist).
-            if (pl.consume) {
-              setStatus('Loading playlist…');
-              waitForPlaylistIds(pl, 0);
-            } else {
-              setupNativeYT();
-            }
+            // We drive every playlist ourselves: read its video ids, then play
+            // them one at a time. That lets us honour REVERSE/consume, and it
+            // makes ENDED fire reliably per video (it doesn't when YouTube runs
+            // the playlist natively). setupNativeYT stays only as a fallback for
+            // when the ids can't be read.
+            setStatus('Loading playlist…');
+            waitForPlaylistIds(pl, 0);
           },
           onStateChange: function (e) {
             var d = player.getVideoData ? player.getVideoData() : null;
@@ -413,7 +412,8 @@
       });
     }
 
-    // Retain playlist: YouTube drives order and looping, nothing is dropped.
+    // Fallback when the playlist's ids can't be read: let YouTube drive order
+    // and looping natively. Order is not reversed and consume is off in here.
     function setupNativeYT() {
       ctl = {
         prev:   function () { player.previousVideo(); },
@@ -438,13 +438,14 @@
       if (ids.length) { initManagedYT(pl, ids); return; }
       if (tries < 25) { setTimeout(function () { waitForPlaylistIds(pl, tries + 1); }, 200); return; }
       // Couldn't read the list — fall back to plain looping so the app still works.
-      setErr('Could not read playlist — auto-remove off');
+      setErr('Could not read playlist — reverse/auto-remove off');
       setupNativeYT();
     }
 
     function initManagedYT(pl, ids) {
+      ids = ids.slice();                 // never mutate YouTube's own array
+      if (REVERSE) { ids.reverse(); }    // newest-added first
       if (SHUFFLE) {
-        ids = ids.slice();
         for (var s = ids.length - 1; s > 0; s--) {
           var r = Math.floor(Math.random() * (s + 1));
           var t = ids[s]; ids[s] = ids[r]; ids[r] = t;
@@ -452,7 +453,7 @@
       }
       var items = ids.map(function (id) { return { key: id }; });
       managed = makeQueue(items, {
-        consume:  true,
+        consume:  !!pl.consume,
         storeKey: pl.list,
         play: function (item, autoplay) {
           if (autoplay) { player.loadVideoById(item.key); }
@@ -482,6 +483,7 @@
 
     function initLocal(list, pl) {
       list = list.slice();
+      if (REVERSE) { list.reverse(); }   // newest-added first
       if (SHUFFLE) {
         for (var s = list.length - 1; s > 0; s--) {
           var r = Math.floor(Math.random() * (s + 1));
