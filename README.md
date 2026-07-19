@@ -60,16 +60,25 @@ Config knobs at the top of the script in `index.html`:
 
 - `PLAYLISTS` — the list of playlists shown on the selection screen. Add a
   `{ name: 'My Mix', list: 'PLxxxxxxxx' }` entry for each YouTube playlist;
-  add `consume: true` to auto-remove finished videos (see above).
-- `REVERSE` — `true` (the default) plays newest-first: the last videos added
-  to a playlist play before older ones (16 → 15 → …). Set `false` for the
-  original oldest-first order. (both kinds)
-- `SHUFFLE` — `true` for random order (overrides `REVERSE`; both kinds)
+  add `consume: true` to auto-remove finished videos (see above); add
+  `reverse: true` to play that playlist newest-added-first (see below).
+- `reverse` (per playlist) — `true` plays that one playlist newest-first: the
+  last videos added play before older ones (16 → 15 → …). Use it for playlists
+  you build yourself, which add new videos at the end. Leave it off for
+  playlists made by others, which are already curated newest-first and so play
+  correctly in their own order. When a playlist doesn't set `reverse`, it
+  follows `REVERSE`. (both kinds)
+- `REVERSE` — the default `reverse` for playlists that don't set their own.
+  `false` (the default) plays each playlist in its own order; set `true` to
+  make every playlist newest-first unless it overrides with `reverse: false`.
+- `SHUFFLE` — `true` for random order (overrides `reverse`/`REVERSE`; both
+  kinds)
 
 ## Self-hosted mode — cannot be blocked
 
-Put a `videos.json` at the repo root listing the files (with the default
-`REVERSE`, the last one listed plays first):
+Put a `videos.json` at the repo root listing the files in the order they
+should play (the first entry plays first; add a `reverse: true` entry in
+`PLAYLISTS` or flip `REVERSE` to play the last one listed first):
 
 ```json
 [
