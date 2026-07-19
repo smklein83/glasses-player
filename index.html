@@ -54,6 +54,10 @@
       height: 28px; line-height: 28px;
       text-align: center; font-size: 16px; color: #6fb8d4;
     }
+    /* The Refresh action lives at the bottom of the playlist list; dashed so it
+       reads as an action, not a playlist. Keeps the 92px tap target + focus ring. */
+    #pl-refresh { color: #9fe8ff; border-style: dashed; }
+    #pl-refresh:focus { border-style: solid; }
 
     /* ---- Player screen ---- */
     #status {
@@ -247,8 +251,24 @@
         b.addEventListener('click', function () { selectPlaylist(i); });
         box.appendChild(b);
       });
+      // A one-tap way to un-freeze the glasses. The no-cache meta tags in the
+      // head are best-effort — browsers ignore http-equiv cache directives, so a
+      // web app left open for days can keep serving an old build (and with it an
+      // old episode list). Reloading with a fresh URL forces the glasses browser
+      // to re-fetch index.html (new deploys) and, on the way back in, re-read
+      // every playlist's videos live from YouTube (new episodes).
+      var refresh = document.createElement('button');
+      refresh.id = 'pl-refresh';
+      refresh.className = 'pl-item focusable';
+      refresh.textContent = '↻ Refresh';
+      refresh.addEventListener('click', function () {
+        refresh.textContent = 'Refreshing…';
+        var base = location.href.split('#')[0].split('?')[0];
+        location.replace(base + '?r=' + Date.now());
+      });
+      box.appendChild(refresh);
       showScreen('playlist');
-      var first = box.querySelector('.pl-item');
+      var first = box.querySelector('.pl-item');   // first playlist (refresh is last)
       if (first) { first.focus(); }
     }
 

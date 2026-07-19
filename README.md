@@ -24,6 +24,25 @@ both use the same player UI:
 | YouTube | `{ name, list }` | the playlist `list` via the IFrame API |
 | Self-hosted | `{ name, videos: [...] }` | your own video files |
 
+## Refreshing (new episodes and new builds)
+
+Playlists are read **live from YouTube each time you open them**, so the newest
+episodes appear on their own — as long as the page is actually re-read. Two
+things can make a playlist look frozen on a week-old episode:
+
+- **You've stayed inside one playlist.** Its video list is read once, when you
+  select it. Press **Prev twice** to return to the picker and select it again to
+  pull the latest episodes.
+- **The glasses are holding a resident copy of the whole app.** The `no-cache`
+  meta tags in `index.html` are best-effort — browsers ignore `http-equiv` cache
+  directives and GitHub Pages sets its own headers — so a web app left open for
+  days can keep serving an old build, and with it an old playlist config and old
+  episode list.
+
+The **↻ Refresh** button at the bottom of the picker handles both: it reloads
+the page with a fresh URL, forcing the glasses browser to re-fetch `index.html`
+(new deploys) and re-read every playlist's videos from YouTube (new episodes).
+
 ## Auto-remove finished videos (`consume`)
 
 Add `consume: true` to a playlist entry and any video you play **to the
